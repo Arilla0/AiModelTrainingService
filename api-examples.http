@@ -1,0 +1,186 @@
+### AI Model Training Service - API Examples
+### Базовый URL: http://localhost:5000
+
+### 1. Получить все модели
+GET http://localhost:5000/api/models
+Accept: application/json
+
+###
+
+### 2. Создать новую модель
+POST http://localhost:5000/api/models
+Content-Type: application/json
+
+{
+  "name": "Image Classification Model",
+  "description": "Модель для классификации изображений на основе CNN",
+  "type": 5,
+  "configuration": "{\"algorithm\": \"CNN\", \"layers\": 5, \"activation\": \"relu\"}",
+  "createdBy": "ml-engineer"
+}
+
+###
+
+### 3. Получить модель по ID (замените на реальный ID)
+GET http://localhost:5000/api/models/{{modelId}}
+Accept: application/json
+
+###
+
+### 4. Обновить модель
+PUT http://localhost:5000/api/models/{{modelId}}
+Content-Type: application/json
+
+{
+  "name": "Updated Image Classification Model",
+  "description": "Обновленная модель для классификации изображений",
+  "configuration": "{\"algorithm\": \"CNN\", \"layers\": 7, \"activation\": \"relu\", \"dropout\": 0.2}"
+}
+
+###
+
+### 5. Запустить обучение модели
+POST http://localhost:5000/api/models/{{modelId}}/training
+Content-Type: application/json
+
+{
+  "jobName": "Training Job - Batch 1",
+  "parameters": "{\"learning_rate\": 0.001, \"batch_size\": 32, \"optimizer\": \"adam\"}",
+  "epochs": 50
+}
+
+###
+
+### 6. Получить задачи обучения модели
+GET http://localhost:5000/api/models/{{modelId}}/training
+Accept: application/json
+
+###
+
+### 7. Получить задачу обучения по ID
+GET http://localhost:5000/api/trainingjobs/{{jobId}}
+Accept: application/json
+
+###
+
+### 8. Получить метрики обучения
+GET http://localhost:5000/api/trainingjobs/{{jobId}}/metrics
+Accept: application/json
+
+###
+
+### 9. Отменить обучение
+POST http://localhost:5000/api/trainingjobs/{{jobId}}/cancel
+
+###
+
+### 10. Получить все наборы данных
+GET http://localhost:5000/api/datasets
+Accept: application/json
+
+###
+
+### 11. Создать новый набор данных
+POST http://localhost:5000/api/datasets
+Content-Type: application/json
+
+{
+  "name": "CIFAR-10 Dataset",
+  "description": "Набор данных для классификации изображений (10 классов)",
+  "filePath": "/data/datasets/cifar10.csv",
+  "format": "CSV",
+  "fileSize": 1048576,
+  "recordCount": 50000,
+  "createdBy": "data-engineer"
+}
+
+###
+
+### 12. Получить набор данных по ID
+GET http://localhost:5000/api/datasets/{{datasetId}}
+Accept: application/json
+
+###
+
+### 13. Обновить набор данных
+PUT http://localhost:5000/api/datasets/{{datasetId}}
+Content-Type: application/json
+
+{
+  "name": "CIFAR-10 Enhanced Dataset",
+  "description": "Расширенный набор данных CIFAR-10 с дополнительными аугментациями"
+}
+
+###
+
+### 14. Привязать набор данных к модели
+POST http://localhost:5000/api/datasets/{{datasetId}}/models/{{modelId}}
+
+###
+
+### 15. Получить наборы данных модели
+GET http://localhost:5000/api/datasets/models/{{modelId}}
+Accept: application/json
+
+###
+
+### 16. Отвязать набор данных от модели
+DELETE http://localhost:5000/api/datasets/{{datasetId}}/models/{{modelId}}
+
+###
+
+### 17. Удалить набор данных
+DELETE http://localhost:5000/api/datasets/{{datasetId}}
+
+###
+
+### 18. Удалить модель
+DELETE http://localhost:5000/api/models/{{modelId}}
+
+###
+
+### Примеры с различными типами моделей:
+
+### Создать модель регрессии
+POST http://localhost:5000/api/models
+Content-Type: application/json
+
+{
+  "name": "House Price Prediction",
+  "description": "Модель для предсказания цен на недвижимость",
+  "type": 1,
+  "configuration": "{\"algorithm\": \"LinearRegression\", \"features\": [\"area\", \"rooms\", \"location\"]}",
+  "createdBy": "data-scientist"
+}
+
+###
+
+### Создать модель NLP
+POST http://localhost:5000/api/models
+Content-Type: application/json
+
+{
+  "name": "Sentiment Analysis Model",
+  "description": "Модель для анализа тональности текста",
+  "type": 4,
+  "configuration": "{\"algorithm\": \"BERT\", \"max_length\": 512, \"num_labels\": 3}",
+  "createdBy": "nlp-engineer"
+}
+
+###
+
+### Создать набор данных для NLP
+POST http://localhost:5000/api/datasets
+Content-Type: application/json
+
+{
+  "name": "Movie Reviews Dataset",
+  "description": "Набор данных с отзывами о фильмах для анализа тональности",
+  "filePath": "/data/nlp/movie_reviews.json",
+  "format": "JSON",
+  "fileSize": 2097152,
+  "recordCount": 25000,
+  "createdBy": "nlp-engineer"
+}
+
+###
