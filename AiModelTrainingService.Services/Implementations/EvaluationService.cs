@@ -11,18 +11,20 @@ public class EvaluationService : IModelEvaluator
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EvaluationService> _logger;
+    private readonly ILoggerFactory _loggerFactory;
 
-    public EvaluationService(IUnitOfWork unitOfWork, ILogger<EvaluationService> logger)
+    public EvaluationService(IUnitOfWork unitOfWork, ILogger<EvaluationService> logger, ILoggerFactory loggerFactory)
     {
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _loggerFactory = loggerFactory;
     }
 
     public async Task<EvaluationMetrics> EvaluateModelAsync(TrainingResult trainingResult, IEnumerable<TrainingData> testData, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Evaluating model: {ModelId}", trainingResult.Id);
 
-        var model = new DeepLOBModel(logger: _logger);
+        var model = new DeepLOBModel(logger: _loggerFactory.CreateLogger<DeepLOBModel>());
         model.LoadModel(trainingResult.ModelPath);
 
         var (xTest, yTest) = PrepareTestData(testData);
@@ -60,7 +62,7 @@ public class EvaluationService : IModelEvaluator
 
     public async Task<IEnumerable<PredictionResult>> MakePredictionsAsync(string modelPath, IEnumerable<TrainingData> inputData, CancellationToken cancellationToken = default)
     {
-        var model = new DeepLOBModel(logger: _logger);
+        var model = new DeepLOBModel(logger: _loggerFactory.CreateLogger<DeepLOBModel>());
         model.LoadModel(modelPath);
 
         var (xData, _) = PrepareTestData(inputData);
@@ -225,7 +227,7 @@ public class EvaluationService : IModelEvaluator
 
         var dataList = data.ToList();
         var foldSize = dataList.Count / folds;
-        var foldScores = new List<decimal>();
+        var foldScores = new List<double>();
 
         for (int fold = 0; fold < folds; fold++)
         {
@@ -249,7 +251,7 @@ public class EvaluationService : IModelEvaluator
                 numFeatures: 40,
                 numClasses: 3,
                 learningRate: 0.001f,
-                logger: _logger
+                logger: _loggerFactory.CreateLogger<DeepLOBModel>()
             );
 
             model.BuildModel();
@@ -285,15 +287,16 @@ public class EvaluationService : IModelEvaluator
     {
         _logger.LogInformation("Performing backtest with {DataPoints} data points", historicalData.Count());
 
-        var model = new DeepLOBModel(logger: _logger);
+        var model = new DeepLOBModel(logger: _loggerFactory.CreateLogger<DeepLOBModel>());
         model.LoadModel(modelPath);
 
         var dataList = historicalData.OrderBy(d => d.CreatedAt).ToList();
         var trades = new List<Trade>();
-        var portfolio = new Portfolio(config.InitialCapital);
-        var currentPosition = 0m; // -1: short, 0: neutral, 1: long
+        var initialPrice = Convert.ToDouble(JsonConvert.DeserializeObject<Dictionary<string, object>>(dataList.First().Features)?["mid_price"] ?? 100.0);
+        var portfolio = new Portfolio(config.InitialCapital, initialPrice);
+        var currentPosition = 0.0; // -1: short, 0: neutral, 1: long
 
-        for (int i = config.LookbackPeriod; i < dataList.Count; i++)
+        for (int i = config.LookbackPeriod; i < dataList.Count(); i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -303,7 +306,7 @@ public class EvaluationService : IModelEvaluator
             
             // Extract price from features (assuming it's available)
             var features = JsonConvert.DeserializeObject<Dictionary<string, object>>(currentData.Features);
-            var currentPrice = Convert.ToDecimal(features?["mid_price"] ?? 100m);
+            var currentPrice = Convert.ToDouble(features?["mid_price"] ?? 100.0);
 
             // Trading logic based on prediction
             var predictedDirection = prediction.PredictedValue;
@@ -311,10 +314,10 @@ public class EvaluationService : IModelEvaluator
 
             if (confidence > config.ConfidenceThreshold)
             {
-                var targetPosition = predictedDirection;
+                var targetPosition = (double)predictedDirection;
                 var positionChange = targetPosition - currentPosition;
 
-                if (Math.Abs(positionChange) > 0.5m) // Significant position change
+                if (Math.Abs(positionChange) > 0.5) // Significant position change
                 {
                     var trade = new Trade
                     {
@@ -328,11 +331,10 @@ public class EvaluationService : IModelEvaluator
                     trades.Add(trade);
                     portfolio.ExecuteTrade(trade);
                     currentPosition = targetPosition;
+                    // Update portfolio value
+                    portfolio.UpdateValue(currentPrice, currentPosition * config.PositionSize);
                 }
             }
-
-            // Update portfolio value
-            portfolio.UpdateValue(currentPrice, currentPosition * config.PositionSize);
         }
 
         var backtestMetrics = CalculateBacktestMetrics(portfolio, trades, config);
@@ -459,9 +461,9 @@ public class EvaluationService : IModelEvaluator
         };
     }
 
-    private List<decimal> SimulateTradingReturns(float[,] predictions, float[,] trueLabels, IEnumerable<TrainingData> testData)
+    private List<double> SimulateTradingReturns(float[,] predictions, float[,] trueLabels, IEnumerable<TrainingData> testData)
     {
-        var returns = new List<decimal>();
+        var returns = new List<double>();
         var predClasses = ArgMax(predictions);
         var trueClasses = ArgMax(trueLabels);
 
@@ -482,7 +484,7 @@ public class EvaluationService : IModelEvaluator
         return returns;
     }
 
-    private decimal CalculateSharpeRatio(List<decimal> returns, decimal riskFreeRate = 0.02m)
+    private double CalculateSharpeRatio(List<double> returns, double riskFreeRate = 0.02)
     {
         if (!returns.Any()) return 0;
 
@@ -493,11 +495,11 @@ public class EvaluationService : IModelEvaluator
         return volatility > 0 ? excessReturn / volatility : 0;
     }
 
-    private decimal CalculateMaxDrawdown(List<decimal> returns)
+    private double CalculateMaxDrawdown(List<double> returns)
     {
         if (!returns.Any()) return 0;
 
-        var cumulativeReturns = new List<decimal> { 1.0 };
+        var cumulativeReturns = new List<double> { 1.0 };
         foreach (var ret in returns)
         {
             cumulativeReturns.Add(cumulativeReturns.Last() * (1 + ret));
@@ -519,7 +521,7 @@ public class EvaluationService : IModelEvaluator
         return maxDrawdown;
     }
 
-    private decimal CalculateVolatility(List<decimal> returns)
+    private double CalculateVolatility(List<double> returns)
     {
         if (returns.Count < 2) return 0;
 
@@ -528,13 +530,13 @@ public class EvaluationService : IModelEvaluator
         return Math.Sqrt(variance);
     }
 
-    private decimal CalculateWinRate(List<decimal> returns)
+    private double CalculateWinRate(List<double> returns)
     {
         if (!returns.Any()) return 0;
-        return (decimal)returns.Count(r => r > 0) / returns.Count;
+        return (double)returns.Count(r => r > 0) / returns.Count;
     }
 
-    private decimal CalculateAccuracy(float[,] predictions, float[,] trueLabels)
+    private double CalculateAccuracy(float[,] predictions, float[,] trueLabels)
     {
         var predClasses = ArgMax(predictions);
         var trueClasses = ArgMax(trueLabels);
@@ -546,16 +548,16 @@ public class EvaluationService : IModelEvaluator
                 correct++;
         }
         
-        return (decimal)correct / predClasses.Length;
+        return (double)correct / predClasses.Length;
     }
 
-    private decimal CalculatePrecision(float[,] predictions, float[,] trueLabels)
+    private double CalculatePrecision(float[,] predictions, float[,] trueLabels)
     {
         var predClasses = ArgMax(predictions);
         var trueClasses = ArgMax(trueLabels);
         var numClasses = predictions.GetLength(1);
         
-        var classPrecisions = new List<decimal>();
+        var classPrecisions = new List<double>();
         
         for (int c = 0; c < numClasses; c++)
         {
@@ -574,19 +576,19 @@ public class EvaluationService : IModelEvaluator
             }
             
             if (truePositives + falsePositives > 0)
-                classPrecisions.Add((decimal)truePositives / (truePositives + falsePositives));
+                classPrecisions.Add((double)truePositives / (truePositives + falsePositives));
         }
         
         return classPrecisions.Any() ? classPrecisions.Average() : 0.0;
     }
 
-    private decimal CalculateRecall(float[,] predictions, float[,] trueLabels)
+    private double CalculateRecall(float[,] predictions, float[,] trueLabels)
     {
         var predClasses = ArgMax(predictions);
         var trueClasses = ArgMax(trueLabels);
         var numClasses = predictions.GetLength(1);
         
-        var classRecalls = new List<decimal>();
+        var classRecalls = new List<double>();
         
         for (int c = 0; c < numClasses; c++)
         {
@@ -605,13 +607,13 @@ public class EvaluationService : IModelEvaluator
             }
             
             if (truePositives + falseNegatives > 0)
-                classRecalls.Add((decimal)truePositives / (truePositives + falseNegatives));
+                classRecalls.Add((double)truePositives / (truePositives + falseNegatives));
         }
         
         return classRecalls.Any() ? classRecalls.Average() : 0.0;
     }
 
-    private decimal CalculateMSE(float[,] predictions, float[,] trueLabels)
+    private double CalculateMSE(float[,] predictions, float[,] trueLabels)
     {
         var numSamples = predictions.GetLength(0);
         var numClasses = predictions.GetLength(1);
@@ -629,7 +631,7 @@ public class EvaluationService : IModelEvaluator
         return mse / (numSamples * numClasses);
     }
 
-    private decimal CalculateMAE(float[,] predictions, float[,] trueLabels)
+    private double CalculateMAE(float[,] predictions, float[,] trueLabels)
     {
         var numSamples = predictions.GetLength(0);
         var numClasses = predictions.GetLength(1);
@@ -646,7 +648,7 @@ public class EvaluationService : IModelEvaluator
         return mae / (numSamples * numClasses);
     }
 
-    private decimal CalculateR2(float[,] predictions, float[,] trueLabels)
+    private double CalculateR2(float[,] predictions, float[,] trueLabels)
     {
         // Simplified R² calculation for multiclass
         var totalSumSquares = 0.0;
@@ -754,7 +756,7 @@ public class EvaluationService : IModelEvaluator
             SharpeRatio = CalculateSharpeRatio(returns),
             MaxDrawdown = CalculateMaxDrawdown(returns),
             Volatility = CalculateVolatility(returns),
-            WinRate = CalculateWinRate(trades.Select(t => (decimal)t.PnL).ToList()),
+            WinRate = CalculateWinRate(trades.Select(t => t.PnL).ToList()),
             TotalReturn = (portfolio.CurrentValue - config.InitialCapital) / config.InitialCapital,
             AverageReturn = returns.Average(),
             NumberOfTrades = trades.Count
@@ -765,24 +767,24 @@ public class EvaluationService : IModelEvaluator
 // Supporting classes
 public class ModelMetrics
 {
-    public decimal Accuracy { get; set; }
-    public decimal Precision { get; set; }
-    public decimal Recall { get; set; }
-    public decimal F1Score { get; set; }
-    public decimal MeanSquaredError { get; set; }
-    public decimal MeanAbsoluteError { get; set; }
-    public decimal RootMeanSquaredError { get; set; }
-    public decimal R2Score { get; set; }
+    public double Accuracy { get; set; }
+    public double Precision { get; set; }
+    public double Recall { get; set; }
+    public double F1Score { get; set; }
+    public double MeanSquaredError { get; set; }
+    public double MeanAbsoluteError { get; set; }
+    public double RootMeanSquaredError { get; set; }
+    public double R2Score { get; set; }
 }
 
 public class TradingMetrics
 {
-    public decimal SharpeRatio { get; set; }
-    public decimal MaxDrawdown { get; set; }
-    public decimal Volatility { get; set; }
-    public decimal WinRate { get; set; }
-    public decimal TotalReturn { get; set; }
-    public decimal AverageReturn { get; set; }
+    public double SharpeRatio { get; set; }
+    public double MaxDrawdown { get; set; }
+    public double Volatility { get; set; }
+    public double WinRate { get; set; }
+    public double TotalReturn { get; set; }
+    public double AverageReturn { get; set; }
     public int NumberOfTrades { get; set; }
 }
 
@@ -790,73 +792,75 @@ public class BacktestResult
 {
     public DateTime StartDate { get; set; }
     public DateTime EndDate { get; set; }
-    public decimal InitialCapital { get; set; }
-    public decimal FinalValue { get; set; }
-    public decimal TotalReturn { get; set; }
+    public double InitialCapital { get; set; }
+    public double FinalValue { get; set; }
+    public double TotalReturn { get; set; }
     public int TotalTrades { get; set; }
     public int WinningTrades { get; set; }
     public int LosingTrades { get; set; }
-    public decimal SharpeRatio { get; set; }
-    public decimal MaxDrawdown { get; set; }
+    public double SharpeRatio { get; set; }
+    public double MaxDrawdown { get; set; }
     public List<Trade> Trades { get; set; } = new();
-    public List<decimal> PortfolioHistory { get; set; } = new();
+    public List<double> PortfolioHistory { get; set; } = new();
     public BacktestMetrics Metrics { get; set; } = new();
 }
 
 public class BacktestConfiguration
 {
-    public decimal InitialCapital { get; set; } = 100000m;
-    public decimal PositionSize { get; set; } = 1000m;
-    public decimal ConfidenceThreshold { get; set; } = 0.6;
+    public double InitialCapital { get; set; } = 100000;
+    public double PositionSize { get; set; } = 1000;
+    public double ConfidenceThreshold { get; set; } = 0.6;
     public int LookbackPeriod { get; set; } = 100;
-    public decimal TransactionCost { get; set; } = 0.001m;
+    public double TransactionCost { get; set; } = 0.001;
 }
 
 public class BacktestMetrics
 {
-    public decimal SharpeRatio { get; set; }
-    public decimal MaxDrawdown { get; set; }
-    public decimal Volatility { get; set; }
-    public decimal WinRate { get; set; }
-    public decimal TotalReturn { get; set; }
-    public decimal AverageReturn { get; set; }
+    public double SharpeRatio { get; set; }
+    public double MaxDrawdown { get; set; }
+    public double Volatility { get; set; }
+    public double WinRate { get; set; }
+    public double TotalReturn { get; set; }
+    public double AverageReturn { get; set; }
     public int NumberOfTrades { get; set; }
 }
 
 public class Trade
 {
     public DateTime Timestamp { get; set; }
-    public decimal Price { get; set; }
-    public decimal Quantity { get; set; }
+    public double Price { get; set; }
+    public double Quantity { get; set; }
     public string Direction { get; set; } = string.Empty;
-    public decimal Confidence { get; set; }
-    public decimal PnL { get; set; }
+    public double Confidence { get; set; }
+    public double PnL { get; set; }
 }
 
 public class Portfolio
 {
-    public decimal InitialValue { get; }
-    public decimal CurrentValue { get; private set; }
-    public List<decimal> ValueHistory { get; } = new();
+    public double InitialValue { get; }
+    public double CurrentValue { get; private set; }
+    public List<double> ValueHistory { get; } = new();
+    private double _lastPrice;
 
-    public Portfolio(decimal initialValue)
+    public Portfolio(double initialValue, double initialPrice)
     {
         InitialValue = initialValue;
         CurrentValue = initialValue;
         ValueHistory.Add(initialValue);
+        _lastPrice = initialPrice;
     }
 
     public void ExecuteTrade(Trade trade)
     {
         // Simplified trade execution
-        var cost = Math.Abs(trade.Quantity * trade.Price * 0.001m); // 0.1% transaction cost
+        var cost = Math.Abs(trade.Quantity * trade.Price * 0.001); // 0.1% transaction cost
         CurrentValue -= cost;
         
-        // PnL will be calculated when position is closed
-        trade.PnL = 0; // Placeholder
+        trade.PnL = trade.Quantity * (trade.Price - _lastPrice);
+        _lastPrice = trade.Price;
     }
 
-    public void UpdateValue(decimal currentPrice, decimal position)
+    public void UpdateValue(double currentPrice, double position)
     {
         // Update portfolio value based on current position and price
         CurrentValue = InitialValue + (position * currentPrice);

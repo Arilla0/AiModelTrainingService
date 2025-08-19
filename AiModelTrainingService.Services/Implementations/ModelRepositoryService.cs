@@ -51,7 +51,7 @@ public class ModelRepositoryService : IModelRepository
 
         var fileInfo = new FileInfo(modelPath);
         
-        return await Task.FromResult(new ModelMetadata
+        return await Task.FromResult(new AiModelTrainingService.Core.Interfaces.ModelMetadata
         {
             ModelPath = modelPath,
             Size = fileInfo.Length,
