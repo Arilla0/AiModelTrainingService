@@ -482,7 +482,7 @@ public class EvaluationService : IModelEvaluator
         return returns;
     }
 
-    private decimal CalculateSharpeRatio(List<decimal> returns, decimal riskFreeRate = 0.02)
+    private decimal CalculateSharpeRatio(List<decimal> returns, decimal riskFreeRate = 0.02m)
     {
         if (!returns.Any()) return 0;
 
