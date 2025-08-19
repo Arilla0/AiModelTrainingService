@@ -31,8 +31,8 @@ public class ModelRegistry
         {
             Id = Guid.NewGuid(),
             ModelId = trainingResult.Id,
-            ModelName = metadata.Name,
-            Version = GenerateVersion(metadata.Name),
+            ModelName = metadata.ModelPath,
+            Version = GenerateVersion(metadata.ModelPath),
             ModelPath = trainingResult.ModelPath,
             Status = ModelRegistryStatus.Registered,
             Metadata = metadata,
@@ -86,8 +86,6 @@ public class ModelRegistry
             if (filter.CreatedBefore.HasValue)
                 query = query.Where(m => m.CreatedAt <= filter.CreatedBefore.Value);
 
-            if (!string.IsNullOrEmpty(filter.Tag))
-                query = query.Where(m => m.Metadata.Tags.Contains(filter.Tag));
         }
 
         return query.OrderByDescending(m => m.CreatedAt);
@@ -107,11 +105,6 @@ public class ModelRegistry
         entry.Status = status;
         entry.UpdatedAt = DateTime.UtcNow;
         
-        if (!string.IsNullOrEmpty(notes))
-        {
-            entry.Metadata.Notes = notes;
-        }
-
         // Update deployment history
         entry.DeploymentHistory.Add(new DeploymentRecord
         {
@@ -467,7 +460,7 @@ public class ModelRegistry
         
         if (File.Exists(sourceFile))
         {
-            await File.CopyToAsync(sourceFile, destFile, cancellationToken);
+            await Task.Run(() => File.Copy(sourceFile, destFile, true), cancellationToken);
         }
     }
 
@@ -543,15 +536,6 @@ public class ModelRegistryEntry
     public List<DeploymentRecord> DeploymentHistory { get; set; } = new();
 }
 
-public class ModelMetadata
-{
-    public string Name { get; set; } = string.Empty;
-    public string Description { get; set; } = string.Empty;
-    public string Author { get; set; } = string.Empty;
-    public List<string> Tags { get; set; } = new();
-    public Dictionary<string, object> Properties { get; set; } = new();
-    public string Notes { get; set; } = string.Empty;
-}
 
 public class DeploymentRecord
 {

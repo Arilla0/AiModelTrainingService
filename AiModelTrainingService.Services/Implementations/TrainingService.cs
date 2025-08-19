@@ -16,6 +16,7 @@ public class TrainingService
     private readonly IFeatureEngineering _featureEngineering;
     private readonly IModelRepository _modelRepository;
     private readonly ILogger<TrainingService> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly Dictionary<Guid, CancellationTokenSource> _trainingCancellationTokens = new();
 
     public TrainingService(
@@ -23,18 +24,20 @@ public class TrainingService
         IDataLoader dataLoader,
         IFeatureEngineering featureEngineering,
         IModelRepository modelRepository,
-        ILogger<TrainingService> logger)
+        ILogger<TrainingService> logger,
+        ILoggerFactory loggerFactory)
     {
         _unitOfWork = unitOfWork;
         _dataLoader = dataLoader;
         _featureEngineering = featureEngineering;
         _modelRepository = modelRepository;
         _logger = logger;
+        _loggerFactory = loggerFactory;
     }
 
     public async Task<TrainingResult> TrainModelAsync(
-        Guid modelConfigurationId, 
-        Guid datasetId, 
+        Guid modelConfigurationId,
+        Guid datasetId,
         TrainingConfiguration trainingConfig,
         CancellationToken cancellationToken = default)
     {
@@ -79,7 +82,7 @@ public class TrainingService
                 numFeatures: modelParams.NumFeatures,
                 numClasses: modelParams.NumClasses,
                 learningRate: modelParams.LearningRate,
-                logger: _logger
+                logger: _loggerFactory.CreateLogger<DeepLOBModel>()
             );
 
             deepLobModel.BuildModel();
@@ -191,7 +194,7 @@ public class TrainingService
         }
         finally
         {
-            _trainingCancellationTokens.TryRemove(trainingResult.Id, out _);
+            _trainingCancellationTokens.Remove(trainingResult.Id);
         }
 
         return trainingResult;
@@ -213,14 +216,14 @@ public class TrainingService
     {
         var repository = _unitOfWork.Repository<TrainingResult>();
         var trainingResult = await repository.GetByIdAsync(trainingResultId);
-        
+
         if (trainingResult == null)
             throw new ArgumentException($"Training result with ID {trainingResultId} not found.");
 
         _logger.LogInformation("Resuming training for model: {ModelId}", trainingResultId);
 
         // Load existing model
-        var deepLobModel = new DeepLOBModel(logger: _logger);
+        var deepLobModel = new DeepLOBModel(logger: _loggerFactory.CreateLogger<DeepLOBModel>());
         deepLobModel.LoadModel(trainingResult.ModelPath);
 
         // Continue training from last checkpoint
@@ -249,7 +252,7 @@ public class TrainingService
     }
 
     private async Task<(float loss, EpochMetrics metrics)> TrainEpoch(
-        DeepLOBModel model, float[,,] xTrain, float[,] yTrain, 
+        DeepLOBModel model, float[,,] xTrain, float[,] yTrain,
         IOptimizer optimizer, int batchSize, CancellationToken cancellationToken)
     {
         var numSamples = xTrain.GetLength(0);
@@ -288,7 +291,7 @@ public class TrainingService
     }
 
     private async Task<(float loss, EpochMetrics metrics)> ValidateEpoch(
-        DeepLOBModel model, float[,,] xVal, float[,] yVal, 
+        DeepLOBModel model, float[,,] xVal, float[,] yVal,
         int batchSize, CancellationToken cancellationToken)
     {
         var predictions = model.Predict(xVal);
@@ -378,7 +381,7 @@ public class TrainingService
         }
 
         return await _dataLoader.LoadOrderBookDataBySymbolAsync(
-            "BTCUSD", 
+            "BTCUSD",
             DateTime.UtcNow.AddDays(-30),
             DateTime.UtcNow,
             cancellationToken
@@ -393,10 +396,10 @@ public class TrainingService
 
         var xTrain = ConvertToArray(trainData.Select(x => x.Features));
         var yTrain = ConvertLabelsToArray(trainData.Select(x => x.Labels));
-        
+
         var xVal = ConvertToArray(valData.Select(x => x.Features));
         var yVal = ConvertLabelsToArray(valData.Select(x => x.Labels));
-        
+
         var xTest = ConvertToArray(testData.Select(x => x.Features));
         var yTest = ConvertLabelsToArray(testData.Select(x => x.Labels));
 
@@ -406,7 +409,7 @@ public class TrainingService
     private float[,,] ConvertToArray(IEnumerable<string> featuresJson)
     {
         var featuresList = new List<float[]>();
-        
+
         foreach (var json in featuresJson)
         {
             var features = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
@@ -422,7 +425,7 @@ public class TrainingService
         var numSamples = featuresList.Count;
         var numFeatures = featuresList[0].Length;
         var data = new float[numSamples, 1, numFeatures];
-        
+
         for (int i = 0; i < numSamples; i++)
         {
             for (int j = 0; j < numFeatures; j++)
@@ -437,7 +440,7 @@ public class TrainingService
     private float[,] ConvertLabelsToArray(IEnumerable<string> labelsJson)
     {
         var labelsList = new List<int>();
-        
+
         foreach (var json in labelsJson)
         {
             var labels = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
@@ -453,7 +456,7 @@ public class TrainingService
         var numSamples = labelsList.Count;
         var numClasses = 3;
         var oneHot = new float[numSamples, numClasses];
-        
+
         for (int i = 0; i < numSamples; i++)
         {
             var classIndex = labelsList[i];
@@ -466,7 +469,7 @@ public class TrainingService
     private ModelParameters ParseModelParameters(string? parametersJson)
     {
         var defaultParams = new ModelParameters();
-        
+
         if (string.IsNullOrEmpty(parametersJson))
             return defaultParams;
 
@@ -523,7 +526,7 @@ public class TrainingService
         var seqLen = data.GetLength(1);
         var numFeatures = data.GetLength(2);
         var batch = new float[batchSize, seqLen, numFeatures];
-        
+
         for (int i = 0; i < batchSize; i++)
         {
             for (int j = 0; j < seqLen; j++)
@@ -534,7 +537,7 @@ public class TrainingService
                 }
             }
         }
-        
+
         return batch;
     }
 
@@ -542,7 +545,7 @@ public class TrainingService
     {
         var numClasses = data.GetLength(1);
         var batch = new float[batchSize, numClasses];
-        
+
         for (int i = 0; i < batchSize; i++)
         {
             for (int j = 0; j < numClasses; j++)
@@ -550,7 +553,7 @@ public class TrainingService
                 batch[i, j] = data[startIdx + i, j];
             }
         }
-        
+
         return batch;
     }
 
@@ -578,14 +581,14 @@ public class TrainingService
     {
         var predClasses = ArgMax(predictions);
         var trueClasses = ArgMax(trueLabels);
-        
+
         var correct = 0;
         for (int i = 0; i < predClasses.Length; i++)
         {
             if (predClasses[i] == trueClasses[i])
                 correct++;
         }
-        
+
         return correct;
     }
 
@@ -601,14 +604,14 @@ public class TrainingService
         var predClasses = ArgMax(predictions);
         var trueClasses = ArgMax(trueLabels);
         var numClasses = predictions.GetLength(1);
-        
+
         var classPrecisions = new List<double>();
-        
+
         for (int c = 0; c < numClasses; c++)
         {
             var truePositives = 0;
             var falsePositives = 0;
-            
+
             for (int i = 0; i < predClasses.Length; i++)
             {
                 if (predClasses[i] == c)
@@ -619,11 +622,11 @@ public class TrainingService
                         falsePositives++;
                 }
             }
-            
+
             if (truePositives + falsePositives > 0)
                 classPrecisions.Add((double)truePositives / (truePositives + falsePositives));
         }
-        
+
         return classPrecisions.Any() ? classPrecisions.Average() : 0.0;
     }
 
@@ -633,14 +636,14 @@ public class TrainingService
         var predClasses = ArgMax(predictions);
         var trueClasses = ArgMax(trueLabels);
         var numClasses = predictions.GetLength(1);
-        
+
         var classRecalls = new List<double>();
-        
+
         for (int c = 0; c < numClasses; c++)
         {
             var truePositives = 0;
             var falseNegatives = 0;
-            
+
             for (int i = 0; i < trueClasses.Length; i++)
             {
                 if (trueClasses[i] == c)
@@ -651,11 +654,11 @@ public class TrainingService
                         falseNegatives++;
                 }
             }
-            
+
             if (truePositives + falseNegatives > 0)
                 classRecalls.Add((double)truePositives / (truePositives + falseNegatives));
         }
-        
+
         return classRecalls.Any() ? classRecalls.Average() : 0.0;
     }
 
@@ -664,12 +667,12 @@ public class TrainingService
         var numSamples = array.GetLength(0);
         var numClasses = array.GetLength(1);
         var result = new int[numSamples];
-        
+
         for (int i = 0; i < numSamples; i++)
         {
             var maxIndex = 0;
             var maxValue = array[i, 0];
-            
+
             for (int j = 1; j < numClasses; j++)
             {
                 if (array[i, j] > maxValue)
@@ -678,10 +681,10 @@ public class TrainingService
                     maxIndex = j;
                 }
             }
-            
+
             result[i] = maxIndex;
         }
-        
+
         return result;
     }
 
