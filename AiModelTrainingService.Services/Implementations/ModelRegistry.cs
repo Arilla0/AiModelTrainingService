@@ -460,7 +460,9 @@ public class ModelRegistry
         
         if (File.Exists(sourceFile))
         {
-            await Task.Run(() => File.Copy(sourceFile, destFile, true), cancellationToken);
+            using var sourceStream = File.Open(sourceFile, FileMode.Open);
+            using var destinationStream = File.Create(destFile);
+            await sourceStream.CopyToAsync(destinationStream, cancellationToken);
         }
     }
 

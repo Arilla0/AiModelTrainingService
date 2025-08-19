@@ -25,6 +25,9 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddServices(this IServiceCollection services)
     {
+        // Add memory cache
+        services.AddMemoryCache();
+
         // Add existing business services
         services.AddScoped<IModelTrainerService, ModelTrainerService>();
         services.AddScoped<IDatasetService, DatasetService>();
