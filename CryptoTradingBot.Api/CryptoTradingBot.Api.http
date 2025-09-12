@@ -1,0 +1,6 @@
+@CryptoTradingBot.Api_HostAddress = http://localhost:5107
+
+GET {{CryptoTradingBot.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
